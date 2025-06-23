@@ -1,0 +1,54 @@
+# SQL to Kafka Producer Configuration
+
+database:
+  host: ${SQL_SERVER_HOST}
+  port: 1433
+  database: ${SQL_DATABASE}
+  username: ${SQL_USERNAME}
+  password: ${SQL_PASSWORD}
+
+kafka:
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS}
+  security_protocol: SASL_SSL
+  sasl_mechanism: PLAIN
+  sasl_username: ${KAFKA_USERNAME}
+  sasl_password: ${KAFKA_PASSWORD}
+  schema_registry_url: ${SCHEMA_REGISTRY_URL}
+  schema_registry_username: ${SCHEMA_REGISTRY_USERNAME}
+  schema_registry_password: ${SCHEMA_REGISTRY_PASSWORD}
+
+queries:
+  - id: customer_updates
+    name: Customer Updates
+    sql: |
+      SELECT 
+        customer_id,
+        name,
+        email,
+        updated_at,
+        GETDATE() as extracted_at
+      FROM customers
+      WHERE updated_at > DATEADD(hour, -1, GETDATE())
+      ORDER BY updated_at
+    target_topic: sql.customers.updates
+    key_column: customer_id
+    batch_size: 1000
+    schedule: "*/5 * * * *"  # Every 5 minutes
+    enabled: true
+
+  - id: order_events
+    name: Recent Orders
+    sql: |
+      SELECT 
+        order_id,
+        customer_id,
+        order_status,
+        order_total,
+        created_at
+      FROM orders
+      WHERE created_at > DATEADD(minute, -10, GETDATE())
+    target_topic: sql.orders.events
+    key_column: order_id
+    batch_size: 500
+    schedule: "* * * * *"  # Every minute
+    enabled: true
