@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from ..models import KafkaConfig, QueryConfig
 from ..utils.monitoring import metrics
 from ..utils.avro_schema import AvroSchemaGenerator, get_common_schemas
+from .error_handler import ErrorHandler
 
 
 logger = structlog.get_logger(__name__)
@@ -37,6 +39,9 @@ class KafkaProducerWrapper:
         self.schema_registry_client = self._create_schema_registry_client()
         self.key_serializer = StringSerializer('utf_8')
         self._avro_serializers = {}  # Cache for topic-specific serializers
+        
+        # Initialize error handler
+        self.error_handler = ErrorHandler(config)
         
         # Initialize transactions if enabled
         if self.transactions_enabled:
@@ -216,6 +221,9 @@ class KafkaProducerWrapper:
             
             # Process rows in batches
             for row in rows:
+                # Generate correlation ID for this message
+                correlation_id = str(uuid.uuid4())
+                
                 # Build message key
                 key = None
                 if query_config.key_column and query_config.key_column in row:
@@ -224,6 +232,7 @@ class KafkaProducerWrapper:
                 # Add metadata
                 row["_metadata"] = {
                     "query_id": query_config.id,
+                    "correlation_id": correlation_id,
                     "extracted_at": datetime.utcnow().isoformat(),
                     "producer": "sql-kafka-producer"
                 }
@@ -239,11 +248,12 @@ class KafkaProducerWrapper:
                         serialized_key = self.key_serializer(key, SerializationContext(query_config.target_topic, MessageField.KEY)) if key else None
                         serialized_value = avro_serializer(row, SerializationContext(query_config.target_topic, MessageField.VALUE))
                         
-                        # Produce message with serialized data
+                        # Produce message with serialized data and correlation ID
                         self.producer.produce(
                             topic=query_config.target_topic,
                             key=serialized_key,
                             value=serialized_value,
+                            headers={"x-correlation-id": correlation_id},
                             callback=self._delivery_callback
                         )
                     else:
@@ -254,6 +264,7 @@ class KafkaProducerWrapper:
                             topic=query_config.target_topic,
                             key=key,
                             value=value,
+                            headers={"x-correlation-id": correlation_id},
                             callback=self._delivery_callback
                         )
                     
@@ -326,6 +337,10 @@ class KafkaProducerWrapper:
                 
             if self.executor:
                 self.executor.shutdown(wait=True)
+            
+            # Close error handler
+            if self.error_handler:
+                self.error_handler.close()
                 
             self.logger.info("Kafka producer closed")
         except Exception as e:
@@ -337,14 +352,15 @@ class KafkaProducerWrapper:
         rows: List[Dict[str, Any]],
         state_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
-        """Produce query results to Kafka using transactions for exactly-once semantics"""
+        """Produce query results to Kafka using transactions for exactly-once semantics with DLQ support"""
         if not self.transactions_enabled:
             # Fall back to regular produce if transactions aren't enabled
             return self.produce_query_results(query_config, rows)
         
         start_time = time.time()
         messages_sent = 0
-        errors = []
+        messages_dlq = 0
+        successful_rows = []
         
         try:
             # Begin transaction
@@ -362,15 +378,20 @@ class KafkaProducerWrapper:
                 if query_config.key_column and query_config.key_column in row:
                     key = str(row[query_config.key_column])
                 
+                # Generate correlation ID for this message
+                correlation_id = str(uuid.uuid4())
+                
                 # Add metadata
-                row["_metadata"] = {
+                row_with_metadata = row.copy()
+                row_with_metadata["_metadata"] = {
                     "query_id": query_config.id,
+                    "correlation_id": correlation_id,
                     "extracted_at": datetime.utcnow().isoformat(),
                     "producer": "sql-kafka-producer",
                     "transaction_id": self.config.transactional_id
                 }
                 
-                # Serialize and produce message
+                # Try to serialize and produce message
                 try:
                     if self.schema_registry_client:
                         # Schema Registry is configured, Avro is required
@@ -379,43 +400,73 @@ class KafkaProducerWrapper:
                         
                         # Use Avro serialization
                         serialized_key = self.key_serializer(key, SerializationContext(query_config.target_topic, MessageField.KEY)) if key else None
-                        serialized_value = avro_serializer(row, SerializationContext(query_config.target_topic, MessageField.VALUE))
+                        serialized_value = avro_serializer(row_with_metadata, SerializationContext(query_config.target_topic, MessageField.VALUE))
                         
-                        # Produce message with serialized data
+                        # Produce message with serialized data and correlation ID in headers
                         self.producer.produce(
                             topic=query_config.target_topic,
                             key=serialized_key,
                             value=serialized_value,
+                            headers={"x-correlation-id": correlation_id},
                             callback=self._delivery_callback
                         )
                     else:
                         # No Schema Registry configured, use JSON serialization
-                        value = json.dumps(row, default=str)
+                        value = json.dumps(row_with_metadata, default=str)
                         
                         self.producer.produce(
                             topic=query_config.target_topic,
                             key=key,
                             value=value,
+                            headers={"x-correlation-id": correlation_id},
                             callback=self._delivery_callback
                         )
                     
                     self._pending_messages += 1
                     messages_sent += 1
+                    successful_rows.append(row)
                     
                     # Poll for delivery callbacks periodically
                     if messages_sent % 100 == 0:
                         self.producer.poll(0)
                     
                 except Exception as e:
-                    error_msg = f"Failed to produce message: {str(e)}"
-                    errors.append(error_msg)
-                    self.logger.error("Message produce error in transaction", error=error_msg)
-                    raise  # Re-raise to trigger transaction abort
+                    # Handle message-level error with correlation ID
+                    should_continue = self.error_handler.handle_message_error(
+                        error=e,
+                        message_data=row,
+                        query_config=query_config,
+                        key=key,
+                        correlation_id=correlation_id
+                    )
+                    
+                    if should_continue:
+                        # Error was handled (sent to DLQ), continue with batch
+                        messages_dlq += 1
+                        self.logger.debug(
+                            "Message error handled, continuing with batch",
+                            query_id=query_config.id,
+                            correlation_id=correlation_id,
+                            key=key
+                        )
+                    else:
+                        # Error requires transaction abort
+                        self.logger.error(
+                            "Critical error during message processing, aborting transaction",
+                            query_id=query_config.id,
+                            error=str(e)
+                        )
+                        metrics.transaction_aborts.labels(
+                            query_id=query_config.id,
+                            reason="message_processing_error"
+                        ).inc()
+                        raise
             
             # Flush messages before committing
             self.producer.flush(timeout=30)
             
             # Update state if callback provided (e.g., checkpoint state)
+            # Only update state for successfully processed rows
             if state_callback:
                 state_callback()
             
@@ -432,7 +483,8 @@ class KafkaProducerWrapper:
                 "query_id": query_config.id,
                 "rows_processed": len(rows),
                 "messages_sent": messages_sent,
-                "errors": len(errors),
+                "messages_dlq": messages_dlq,
+                "successful_rows": len(successful_rows),
                 "duration_seconds": duration,
                 "transaction_committed": True,
             }
@@ -445,6 +497,10 @@ class KafkaProducerWrapper:
             try:
                 self.abort_transaction()
                 self.logger.error("Transaction aborted due to error", error=str(e))
+                metrics.transaction_aborts.labels(
+                    query_id=query_config.id,
+                    reason="exception"
+                ).inc()
             except Exception as abort_error:
                 self.logger.error("Failed to abort transaction", error=str(abort_error))
             

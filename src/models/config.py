@@ -37,6 +37,18 @@ class DatabaseConfig(BaseModel):
         )
 
 
+class DLQConfig(BaseModel):
+    """Dead Letter Queue configuration"""
+    
+    enabled: bool = True
+    topic_suffix: str = ".dlq"
+    retry_topic_suffix: str = ".retry"
+    max_retries: int = 3
+    retry_delay_seconds: List[int] = Field(default_factory=lambda: [30, 300, 1800])
+    circuit_breaker_failure_threshold: int = 5
+    circuit_breaker_timeout_seconds: int = 300
+
+
 class KafkaConfig(BaseModel):
     """Kafka producer configuration"""
     
@@ -62,6 +74,9 @@ class KafkaConfig(BaseModel):
     schema_registry_url: Optional[str] = None
     schema_registry_username: Optional[str] = None
     schema_registry_password: Optional[SecretStr] = None
+    
+    # DLQ settings
+    dlq: DLQConfig = Field(default_factory=DLQConfig)
     
     def get_producer_config(self) -> Dict[str, Any]:
         """Get Confluent Kafka producer configuration dict"""

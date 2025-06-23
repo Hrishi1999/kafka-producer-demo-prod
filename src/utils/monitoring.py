@@ -45,6 +45,48 @@ db_connections_active = Gauge(
     "Number of active database connections"
 )
 
+# DLQ and error handling metrics
+dlq_messages_sent = Counter(
+    "dlq_messages_sent_total",
+    "Messages sent to Dead Letter Queue",
+    ["original_topic", "error_type"]
+)
+
+dlq_send_failures = Counter(
+    "dlq_send_failures_total",
+    "Failed attempts to send to DLQ",
+    ["original_topic", "error_type"]
+)
+
+dlq_circuit_breaker_open = Counter(
+    "dlq_circuit_breaker_open_total",
+    "Number of times DLQ circuit breaker opened"
+)
+
+message_processing_errors = Counter(
+    "message_processing_errors_total",
+    "Message-level processing errors",
+    ["query_id", "error_type", "topic"]
+)
+
+transaction_aborts = Counter(
+    "kafka_transaction_aborts_total",
+    "Number of Kafka transaction aborts",
+    ["query_id", "reason"]
+)
+
+messages_quarantined = Counter(
+    "messages_quarantined_total",
+    "Messages sent to quarantine after all retries failed",
+    ["query_id", "topic", "error_type"]
+)
+
+final_failures = Counter(
+    "final_failures_total",
+    "Messages that failed permanently after all retry attempts",
+    ["query_id", "topic", "failure_stage"]
+)
+
 
 class Metrics:
     """Metrics collection class"""
@@ -56,6 +98,13 @@ class Metrics:
         self.kafka_messages_sent = kafka_messages_sent
         self.batch_processing_duration = batch_processing_duration
         self.db_connections_active = db_connections_active
+        self.dlq_messages_sent = dlq_messages_sent
+        self.dlq_send_failures = dlq_send_failures
+        self.dlq_circuit_breaker_open = dlq_circuit_breaker_open
+        self.message_processing_errors = message_processing_errors
+        self.transaction_aborts = transaction_aborts
+        self.messages_quarantined = messages_quarantined
+        self.final_failures = final_failures
 
 
 # Global metrics instance

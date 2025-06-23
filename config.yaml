@@ -21,6 +21,16 @@ kafka:
   enable_transactions: ${ENABLE_KAFKA_TRANSACTIONS:false}
   transactional_id: ${KAFKA_TRANSACTIONAL_ID:sql-producer-001-${ENVIRONMENT:dev}-v1}
   transaction_timeout_ms: 60000
+  
+  # DLQ and retry configuration
+  dlq:
+    enabled: ${KAFKA_DLQ_ENABLED:true}
+    topic_suffix: ".dlq"
+    retry_topic_suffix: ".retry"
+    max_retries: 3
+    retry_delay_seconds: [30, 300, 1800]  # 30s, 5m, 30m
+    circuit_breaker_failure_threshold: 5
+    circuit_breaker_timeout_seconds: 300
 
 queries:
   - id: customer_updates
