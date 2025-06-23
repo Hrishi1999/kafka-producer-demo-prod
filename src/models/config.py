@@ -140,6 +140,9 @@ class MonitoringConfig(BaseModel):
     metrics_port: int = 8080
     log_level: str = "INFO"
     log_format: str = "json"
+    log_file: Optional[str] = "logs/sql-kafka-producer.log"
+    max_log_file_size_mb: int = 10
+    log_backup_count: int = 5
 
 
 class AppConfig(BaseModel):

@@ -1,8 +1,7 @@
 """Example demonstrating Kafka transactions usage in the SQL producer"""
 
 import logging
-from datetime import datetime
-from typing import List, Dict, Any
+from datetime import datetime, timezone
 
 from src.models.config import KafkaConfig, QueryConfig
 from src.producers.kafka_producer import KafkaProducerWrapper
@@ -58,7 +57,7 @@ def example_transactional_producer():
         
         # Method 2: Transactional produce with state management
         print("\n=== Transactional Produce with State Management ===")
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         
         # Use state manager's transactional context
         with state_manager.transactional_update(query_config.id, timestamp) as state:
@@ -152,7 +151,7 @@ def example_transaction_failure_handling():
             {"id": 3, "valid": True},
         ]
         
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         
         with state_manager.transactional_update(query_config.id, timestamp):
             try:

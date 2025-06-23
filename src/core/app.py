@@ -3,6 +3,7 @@
 import signal
 import threading
 import time
+from datetime import datetime
 from typing import Dict, Any
 
 import structlog
@@ -29,7 +30,10 @@ class SQLKafkaProducer:
         # Setup logging
         setup_logging(
             log_level=config.monitoring.log_level,
-            log_format=config.monitoring.log_format
+            log_format=config.monitoring.log_format,
+            log_file=config.monitoring.log_file,
+            max_file_size=config.monitoring.max_log_file_size_mb * 1024 * 1024,
+            backup_count=config.monitoring.log_backup_count
         )
         
         # Initialize components
@@ -107,11 +111,21 @@ class SQLKafkaProducer:
             for batch in self.sql_executor.execute_query(query_config, parameters):
                 total_rows += len(batch)
                 
-                # Produce to Kafka
-                result = self.kafka_producer.produce_query_results(query_config, batch)
-            
-            # Update state
-            self.state_manager.update_last_run(query_config.id, start_time)
+                # Use transactional produces if enabled, otherwise regular
+                if self.kafka_producer.transactions_enabled:
+                    # Use transactional produce with state coordination
+                    with self.state_manager.transactional_update(query_config.id, datetime.now()) as state:
+                        def state_callback():
+                            self.logger.debug("State committed with transaction", query_id=query_config.id)
+                        
+                        result = self.kafka_producer.produce_query_results_transactional(
+                            query_config, batch, state_callback
+                        )
+                else:
+                    # Regular produce
+                    result = self.kafka_producer.produce_query_results(query_config, batch)
+                    # Update state separately
+                    self.state_manager.update_last_run(query_config.id, datetime.now())
             
             # Record metrics
             duration = time.time() - start_time

@@ -4,7 +4,9 @@ from prometheus_client import Counter, Histogram, Gauge
 import structlog
 import logging
 import sys
+from pathlib import Path
 from typing import Optional
+from logging.handlers import RotatingFileHandler
 
 
 # Prometheus metrics
@@ -62,26 +64,24 @@ metrics = Metrics()
 
 def setup_logging(
     log_level: str = "INFO",
-    log_format: str = "json"
+    log_format: str = "json",
+    log_file: Optional[str] = "logs/sql-kafka-producer.log",
+    max_file_size: int = 10485760,  # 10MB
+    backup_count: int = 5
 ) -> None:
-    """Setup structured logging"""
+    """Setup structured logging with file and console output"""
     
     # Configure structlog
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer() if log_format == "json" else structlog.dev.ConsoleRenderer()
+            structlog.processors.JSONRenderer()  # JSON for both file and console
         ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
     
@@ -93,10 +93,37 @@ def setup_logging(
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
+    # Create logs directory if it doesn't exist
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # File handler with rotation
+        file_handler = RotatingFileHandler(
+            filename=log_file,
+            maxBytes=max_file_size,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+        file_handler.setLevel(getattr(logging, log_level.upper()))
+        
+        # Use JSON formatter for file logs
+        class StructlogFormatter(logging.Formatter):
+            def format(self, record):
+                # Let structlog handle the formatting
+                return record.getMessage()
+        
+        file_handler.setFormatter(StructlogFormatter())
+        root_logger.addHandler(file_handler)
+    
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    console_handler.setFormatter(formatter)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
+    
+    # Use the same JSON formatter for console
+    class StructlogFormatter(logging.Formatter):
+        def format(self, record):
+            return record.getMessage()
+    
+    console_handler.setFormatter(StructlogFormatter())
     root_logger.addHandler(console_handler)

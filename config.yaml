@@ -16,6 +16,11 @@ kafka:
   schema_registry_url: ${SCHEMA_REGISTRY_URL}
   schema_registry_username: ${SCHEMA_REGISTRY_USERNAME}
   schema_registry_password: ${SCHEMA_REGISTRY_PASSWORD}
+  
+  # Transactional settings for exactly-once semantics
+  enable_transactions: ${ENABLE_KAFKA_TRANSACTIONS:false}
+  transactional_id: ${KAFKA_TRANSACTIONAL_ID:sql-producer-001}
+  transaction_timeout_ms: 60000
 
 queries:
   - id: customer_updates
@@ -52,3 +57,12 @@ queries:
     batch_size: 500
     schedule: "* * * * *"  # Every minute
     enabled: true
+
+monitoring:
+  enabled: true
+  metrics_port: 8080
+  log_level: "INFO"
+  log_format: "json"
+  log_file: "logs/sql-kafka-producer.log"
+  max_log_file_size_mb: 10
+  log_backup_count: 5
