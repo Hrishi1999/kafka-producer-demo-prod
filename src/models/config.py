@@ -127,7 +127,7 @@ class QueryConfig(BaseModel):
     key_column: Optional[str] = None
     batch_size: int = 1000
     fetch_size: int = 1000
-    schedule: Optional[str] = None
+    schedule: Optional[str] = None  # Format: "cron" or "interval:Xs" (e.g., "interval:5s", "interval:30s")
     enabled: bool = True
     timeout_seconds: int = 300
     max_retries: int = 3

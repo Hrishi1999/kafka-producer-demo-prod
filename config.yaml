@@ -19,7 +19,7 @@ kafka:
   
   # Transactional settings for exactly-once semantics
   enable_transactions: ${ENABLE_KAFKA_TRANSACTIONS:false}
-  transactional_id: ${KAFKA_TRANSACTIONAL_ID:sql-producer-001}
+  transactional_id: ${KAFKA_TRANSACTIONAL_ID:sql-producer-001-${ENVIRONMENT:dev}-v1}
   transaction_timeout_ms: 60000
 
 queries:
@@ -38,7 +38,7 @@ queries:
     target_topic: sql.customers.updates
     key_column: customer_id
     batch_size: 1000
-    schedule: "*/5 * * * *"  # Every 5 minutes
+    schedule: "*/5 * * * *"  # Every 5 minutes (cron style)
     enabled: true
 
   - id: order_events
@@ -51,11 +51,14 @@ queries:
         order_total,
         created_at
       FROM orders
-      WHERE created_at > DATEADD(minute, -10, GETDATE())
+      WHERE created_at > DATEADD(second, -10, GETDATE())  -- Only last 10 seconds of data
+      ORDER BY created_at DESC
     target_topic: sql.orders.events
     key_column: order_id
-    batch_size: 500
-    schedule: "* * * * *"  # Every minute
+    batch_size: 100  # Smaller batches for 5-second intervals
+    fetch_size: 100
+    schedule: "interval:5s"  # Every 5 seconds
+    timeout_seconds: 4  # Less than 5s to avoid overlap
     enabled: true
 
 monitoring:
@@ -66,3 +69,8 @@ monitoring:
   log_file: "logs/sql-kafka-producer.log"
   max_log_file_size_mb: 10
   log_backup_count: 5
+
+# Global settings optimized for 5-second intervals
+state_file: "state.json"
+checkpoint_interval_seconds: 10  # Checkpoint every 10 seconds for 5s intervals
+worker_threads: 4

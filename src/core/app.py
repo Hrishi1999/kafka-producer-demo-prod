@@ -168,26 +168,58 @@ class SQLKafkaProducer:
         return parameters
     
     def schedule_queries(self):
-        """Schedule queries"""
+        """Schedule queries with support for seconds-based intervals"""
         for query in self.config.queries:
             if query.schedule and query.enabled:
-                # Simple scheduling
-                if "*/5" in query.schedule:
-                    schedule.every(5).minutes.do(self.run_query, query)
-                elif "*/10" in query.schedule:
-                    schedule.every(10).minutes.do(self.run_query, query)
-                elif "*/30" in query.schedule:
-                    schedule.every(30).minutes.do(self.run_query, query)
-                elif "0 *" in query.schedule:
-                    schedule.every().hour.do(self.run_query, query)
-                else:
-                    schedule.every().minute.do(self.run_query, query)
+                schedule_str = query.schedule.strip()
                 
-                self.logger.info(
-                    "Scheduled query",
-                    query_id=query.id,
-                    schedule=query.schedule
-                )
+                # Handle interval-based scheduling (supports seconds)
+                if schedule_str.startswith("interval:"):
+                    interval_part = schedule_str.replace("interval:", "")
+                    
+                    if interval_part.endswith("s"):
+                        # Seconds interval (e.g., "interval:5s")
+                        seconds = int(interval_part[:-1])
+                        schedule.every(seconds).seconds.do(self.run_query, query)
+                        self.logger.info("Scheduled query with seconds interval", 
+                                       query_id=query.id, interval_seconds=seconds)
+                    
+                    elif interval_part.endswith("m"):
+                        # Minutes interval (e.g., "interval:5m")
+                        minutes = int(interval_part[:-1])
+                        schedule.every(minutes).minutes.do(self.run_query, query)
+                        self.logger.info("Scheduled query with minutes interval", 
+                                       query_id=query.id, interval_minutes=minutes)
+                    
+                    elif interval_part.endswith("h"):
+                        # Hours interval (e.g., "interval:1h")
+                        hours = int(interval_part[:-1])
+                        schedule.every(hours).hours.do(self.run_query, query)
+                        self.logger.info("Scheduled query with hours interval", 
+                                       query_id=query.id, interval_hours=hours)
+                
+                # Handle cron-style scheduling (minutes resolution)
+                elif "*/5" in schedule_str:
+                    schedule.every(5).minutes.do(self.run_query, query)
+                    self.logger.info("Scheduled query (cron-style)", 
+                                   query_id=query.id, schedule="every 5 minutes")
+                elif "*/10" in schedule_str:
+                    schedule.every(10).minutes.do(self.run_query, query)
+                    self.logger.info("Scheduled query (cron-style)", 
+                                   query_id=query.id, schedule="every 10 minutes")
+                elif "*/30" in schedule_str:
+                    schedule.every(30).minutes.do(self.run_query, query)
+                    self.logger.info("Scheduled query (cron-style)", 
+                                   query_id=query.id, schedule="every 30 minutes")
+                elif "0 *" in schedule_str:
+                    schedule.every().hour.do(self.run_query, query)
+                    self.logger.info("Scheduled query (cron-style)", 
+                                   query_id=query.id, schedule="every hour")
+                else:
+                    # Default: every minute
+                    schedule.every().minute.do(self.run_query, query)
+                    self.logger.info("Scheduled query (cron-style)", 
+                                   query_id=query.id, schedule="every minute")
     
     def run(self):
         """Run the application"""
