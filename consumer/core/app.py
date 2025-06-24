@@ -2,7 +2,6 @@ import logging
 import signal
 import sys
 import time
-import uuid
 from threading import Event
 
 from ..models.config import ConsumerConfig
@@ -191,35 +190,4 @@ class HTTPKafkaConsumer:
         self.logger.info("HTTPKafkaConsumer shutdown complete")
 
 
-def main():
-    import yaml
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="HTTP Kafka Consumer")
-    parser.add_argument("--config", default="consumer_config.yaml", help="Config file path")
-    args = parser.parse_args()
-    
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    try:
-        # Load configuration
-        with open(args.config, 'r') as f:
-            config_dict = yaml.safe_load(f)
-        
-        config = ConsumerConfig(**config_dict)
-        
-        # Create and run consumer
-        consumer = HTTPKafkaConsumer(config)
-        consumer.run()
-        
-    except Exception as e:
-        logging.error(f"Failed to start consumer: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+# Main function moved to __main__.py for better CLI experience

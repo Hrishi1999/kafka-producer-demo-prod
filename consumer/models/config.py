@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional, Dict
 import os
 import re
 
@@ -66,14 +66,20 @@ class MonitoringConfig(BaseModel):
     metrics_enabled: bool = Field(True, description="Enable Prometheus metrics")
 
 
+class ConsumerModeConfig(BaseModel):
+    mode: str = Field("main", description="Consumer mode: 'main' or 'retry'")
+
+
 class ConsumerConfig(BaseModel):
     kafka: KafkaConfig
     http: HTTPConfig
     retry: RetryConfig = RetryConfig()
     dlq: DLQConfig = DLQConfig()
     monitoring: MonitoringConfig = MonitoringConfig()
+    consumer_mode: ConsumerModeConfig = ConsumerModeConfig()
     
-    @validator('*', pre=True, always=True)
+    @field_validator('*', mode='before')
+    @classmethod
     def substitute_env_vars(cls, v):
         if isinstance(v, str):
             def replace_env_var(match):

@@ -57,3 +57,6 @@ monitoring:
   enabled: true
   port: 8081
   metrics_enabled: true
+
+consumer_mode:
+  mode: "main"  # Options: "main" or "retry"
