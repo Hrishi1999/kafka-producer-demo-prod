@@ -1,0 +1,59 @@
+kafka:
+  bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
+  group_id: "http-consumer-group"
+  topics:
+    - "events-to-process"
+  
+  # Consumer settings
+  isolation_level: "read_committed"
+  enable_auto_commit: false
+  auto_offset_reset: "latest"
+  max_poll_records: 500
+  session_timeout_ms: 30000
+  heartbeat_interval_ms: 3000
+  
+  # Security (for Confluent Cloud)
+  security_protocol: "SASL_SSL"
+  sasl_mechanism: "PLAIN"
+  sasl_username: "${KAFKA_SASL_USERNAME}"
+  sasl_password: "${KAFKA_SASL_PASSWORD}"
+  
+  # Optional Schema Registry
+  schema_registry_url: "${SCHEMA_REGISTRY_URL}"
+  schema_registry_auth: "${SCHEMA_REGISTRY_AUTH}"
+  
+  # Confluent Cloud API for metrics
+  confluent_api_key: "${CONFLUENT_API_KEY}"
+  confluent_api_secret: "${CONFLUENT_API_SECRET}"
+  cluster_id: "${KAFKA_CLUSTER_ID}"
+
+http:
+  endpoint_url: "${HTTP_ENDPOINT_URL}"
+  timeout_seconds: 30
+  max_retries: 3
+  retry_delay_seconds: [1, 2, 4]
+  
+  # Circuit breaker
+  circuit_breaker_enabled: true
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  
+  # Default headers
+  headers:
+    Content-Type: "application/json"
+    User-Agent: "kafka-http-consumer/1.0"
+
+retry:
+  enabled: true
+  topic_suffix: ".retry"
+  max_retries: 1
+
+dlq:
+  enabled: true
+  topic_suffix: ".dlq"
+  include_error_context: true
+
+monitoring:
+  enabled: true
+  port: 8081
+  metrics_enabled: true
