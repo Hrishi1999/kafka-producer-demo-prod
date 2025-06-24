@@ -26,7 +26,7 @@ class FinalFailureHandler:
     4. Update metrics for monitoring
     """
     
-    def __init__(self, quarantine_dir: str = "quarantine"):
+    def __init__(self, quarantine_dir: str = "C:/Kafka/quarantine"):
         self.quarantine_dir = Path(quarantine_dir)
         self.quarantine_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logger.bind(component="final_failure_handler")

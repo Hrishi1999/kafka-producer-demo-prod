@@ -7,3 +7,13 @@ tenacity>=8.2.0
 click>=8.1.0
 structlog>=23.1.0
 prometheus-client>=0.16.0
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Windows Service Dependencies
+pywin32>=306
+wmi>=1.5.1
+psutil>=5.9.0

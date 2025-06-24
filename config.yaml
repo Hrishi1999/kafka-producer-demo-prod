@@ -76,11 +76,11 @@ monitoring:
   metrics_port: 8080
   log_level: "INFO"
   log_format: "json"
-  log_file: "logs/sql-kafka-producer.log"
+  log_file: "C:/Kafka/logs/sql-kafka-producer.log"
   max_log_file_size_mb: 10
   log_backup_count: 5
 
 # Global settings optimized for 5-second intervals
-state_file: "state.json"
+state_file: "C:/Kafka/state/state.json"
 checkpoint_interval_seconds: 10  # Checkpoint every 10 seconds for 5s intervals
 worker_threads: 4

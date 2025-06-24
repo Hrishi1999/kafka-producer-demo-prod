@@ -4,11 +4,12 @@ import json
 import time
 import uuid
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor
+import decimal
 
 import structlog
-from confluent_kafka import Producer, KafkaError, KafkaException
+from confluent_kafka import Producer, KafkaException
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import StringSerializer, SerializationContext, MessageField
@@ -16,7 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..models import KafkaConfig, QueryConfig
 from ..utils.monitoring import metrics
-from ..utils.avro_schema import AvroSchemaGenerator, get_common_schemas
+from ..utils.avro_schema import AvroSchemaGenerator
 from .error_handler import ErrorHandler
 
 
@@ -46,6 +47,37 @@ class KafkaProducerWrapper:
         # Initialize transactions if enabled
         if self.transactions_enabled:
             self._init_transactions()
+    
+    def _serialize_row_data(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Python types to Avro-compatible types"""
+        serialized_row = {}
+        
+        for key, value in row.items():
+            if value is None:
+                serialized_row[key] = None
+            elif isinstance(value, dict):
+                # Keep dictionaries as-is (like _metadata)
+                serialized_row[key] = value
+            elif isinstance(value, (list, tuple)):
+                # Keep lists/tuples as-is
+                serialized_row[key] = list(value)
+            elif isinstance(value, (date, datetime)):
+                # Convert dates to ISO format strings
+                if isinstance(value, datetime):
+                    serialized_row[key] = value.isoformat()
+                else:
+                    serialized_row[key] = value.isoformat()
+            elif isinstance(value, decimal.Decimal):
+                # Convert Decimal to float
+                serialized_row[key] = float(value)
+            elif isinstance(value, (int, float, str, bool)):
+                # These types are already compatible
+                serialized_row[key] = value
+            else:
+                # Convert other types to string
+                serialized_row[key] = str(value)
+        
+        return serialized_row
     
     def _create_producer(self) -> Producer:
         """Create Confluent Kafka producer instance"""
@@ -129,7 +161,7 @@ class KafkaProducerWrapper:
             return
         
         try:
-            self.producer.abort_transaction(timeout=30)
+            self.producer.abort_transaction()
             self._transaction_active = False
             self.logger.debug("Transaction aborted")
         except Exception as e:
@@ -158,7 +190,7 @@ class KafkaProducerWrapper:
             serializer = AvroSerializer(
                 schema_registry_client=self.schema_registry_client,
                 schema_str=avro_schema,
-                to_dict=lambda obj, ctx: obj  # Objects are already dicts
+                to_dict=lambda obj, _: obj  # Objects are already dicts
             )
             
             self._avro_serializers[topic] = serializer
@@ -229,11 +261,11 @@ class KafkaProducerWrapper:
                 if query_config.key_column and query_config.key_column in row:
                     key = str(row[query_config.key_column])
                 
-                # Add metadata
-                row["_metadata"] = {
+                # Add metadata and convert dates to strings
+                row_with_metadata = self._serialize_row_data(row.copy())
+                row_with_metadata["_metadata"] = {
                     "query_id": query_config.id,
-                    "correlation_id": correlation_id,
-                    "extracted_at": datetime.utcnow().isoformat(),
+                    "extracted_at": datetime.now(datetime.timezone.utc).isoformat(),
                     "producer": "sql-kafka-producer"
                 }
                 
@@ -246,7 +278,7 @@ class KafkaProducerWrapper:
                         
                         # Use Avro serialization
                         serialized_key = self.key_serializer(key, SerializationContext(query_config.target_topic, MessageField.KEY)) if key else None
-                        serialized_value = avro_serializer(row, SerializationContext(query_config.target_topic, MessageField.VALUE))
+                        serialized_value = avro_serializer(row_with_metadata, SerializationContext(query_config.target_topic, MessageField.VALUE))
                         
                         # Produce message with serialized data and correlation ID
                         self.producer.produce(
@@ -258,7 +290,7 @@ class KafkaProducerWrapper:
                         )
                     else:
                         # No Schema Registry configured, use JSON serialization
-                        value = json.dumps(row, default=str)
+                        value = json.dumps(row_with_metadata, default=str)
                         
                         self.producer.produce(
                             topic=query_config.target_topic,
@@ -381,14 +413,12 @@ class KafkaProducerWrapper:
                 # Generate correlation ID for this message
                 correlation_id = str(uuid.uuid4())
                 
-                # Add metadata
-                row_with_metadata = row.copy()
+                # Add metadata and convert dates to strings
+                row_with_metadata = self._serialize_row_data(row.copy())
                 row_with_metadata["_metadata"] = {
                     "query_id": query_config.id,
-                    "correlation_id": correlation_id,
-                    "extracted_at": datetime.utcnow().isoformat(),
-                    "producer": "sql-kafka-producer",
-                    "transaction_id": self.config.transactional_id
+                    "extracted_at": datetime.now(datetime.timezone.utc).isoformat(),
+                    "producer": "sql-kafka-producer"
                 }
                 
                 # Try to serialize and produce message
